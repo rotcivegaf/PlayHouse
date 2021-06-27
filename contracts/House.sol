@@ -50,11 +50,11 @@ contract House is FeeOwnable, ReentrancyGuard {
         bytes32 winOption;
         uint256 totalBalance;
 
-        uint48  startBet;
-        uint48  noMoreBets;
-        uint48  setWinTime;
-        uint48  minRate;
-        uint48  maxRate;
+        uint48 startBet;
+        uint48 noMoreBets;
+        uint48 setWinTime;
+        uint48 minRate;
+        uint48 maxRate;
     }
 
     PlayToken public PLAY;
