@@ -259,6 +259,8 @@ contract House is FeeOwnable, ReentrancyGuard {
 
     // Only fee owner
 
+    // TODO renounce to migrate
+
     function migrate(address _newContract) external onlyFeeOwner {
         PLAY.transferOwnership(_newContract);
         delete (PLAY);
