@@ -30,6 +30,7 @@ contract FeeOwnable {
     function renounceFeeOwnership() external onlyFeeOwner {
         emit FeeOwnershipTransferred(feeOwner, address(0));
         feeOwner = address(0);
+        feeOwnerRate = 0;
     }
 
     function transferFeeOwnership(address newFeeOwner) external onlyFeeOwner {

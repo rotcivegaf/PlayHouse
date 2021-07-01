@@ -64,6 +64,7 @@ contract('FeeOwnable', (accounts) => {
     );
 
     assert.equal(await _feeOwnable.feeOwner(), constants.ZERO_ADDRESS);
+    expect(await _feeOwnable.feeOwnerRate()).to.eq.BN(0);
   });
   it('Function setExcludeFromFee', async () => {
     assert.isFalse(await feeOwnable.excludeFromFee(feeOwner));
