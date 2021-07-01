@@ -58,6 +58,7 @@ contract House is FeeOwnable, ReentrancyGuard {
     }
 
     PlayToken public PLAY;
+    bool public canMigrate = true;
 
     mapping(bytes32 => Bet) public bets;
 
@@ -259,9 +260,12 @@ contract House is FeeOwnable, ReentrancyGuard {
 
     // Only fee owner
 
-    // TODO renounce to migrate
+    function renounceMigrate() external onlyFeeOwner {
+        canMigrate = false;
+    }
 
     function migrate(address _newContract) external onlyFeeOwner {
+        require(canMigrate, "House::migrate: The fee owner was renounce to migrate");
         PLAY.transferOwnership(_newContract);
         delete (PLAY);
     }

@@ -116,6 +116,7 @@ contract('House', (accounts) => {
     const _house = await House.new({ from: anAccount });
 
     assert.isTrue(await _house.excludeFromFee(await _house.PLAY()));
+    assert.isTrue(await _house.canMigrate());
   });
   describe('Functions create', () => {
     it('Create a bet', async () => {
@@ -2263,6 +2264,21 @@ contract('House', (accounts) => {
       );
     });
   });
+  describe('Function renounceMigrate', async () => {
+    it('Renounce migrate', async () => {
+      const _house = await House.new({ from: owner });
+
+      await _house.renounceMigrate({ from: owner });
+
+      assert.isFalse(await _house.canMigrate());
+    });
+    it('Try renounce migrate without be the fee owner', async () => {
+      await expectRevert(
+        house.renounceMigrate({ from: owner }),
+        'FeeOwnable::onlyFeeOwner: caller is not the fee owner',
+      );
+    });
+  });
   describe('Function migrate', async () => {
     it('Migrate to a new house contract', async () => {
       const _house = await House.new({ from: owner });
@@ -2276,6 +2292,15 @@ contract('House', (accounts) => {
       await expectRevert(
         house.migrate(owner, { from: owner }),
         'FeeOwnable::onlyFeeOwner: caller is not the fee owner',
+      );
+    });
+    it('Try migrate when fee owner was renounce', async () => {
+      const _house = await House.new({ from: owner });
+      await _house.renounceMigrate({ from: owner });
+
+      await expectRevert(
+        _house.migrate(owner, { from: owner }),
+        'House::migrate: The fee owner was renounce to migrate',
       );
     });
   });
