@@ -22,13 +22,13 @@ Manage the ERC20 and mint rewards in PlayToken
 
 ```solidity
 struct Bet {
-    IERC20 erc20; // Token of the bet
-    address oracle; // Oracle of the bet
-    mapping(address => uint256) balanceOf; // Player to balance on the bet
+    IERC20 erc20;                                // Token of the bet
+    address oracle;                              // Oracle of the bet
+    mapping(address => uint256) balanceOf;       // Player to balance on the bet
     mapping(bytes32 => uint256) optionBalanceOf; // Option to balance option
-    mapping(address => bytes32) optionOf; // Player to player option
-    bytes32 winOption; // The win option of the bet
-    uint256 totalBalance; // Total balance of this bet
+    mapping(address => bytes32) optionOf;        // Player to player option
+    bytes32 winOption;                           // The win option of the bet
+    uint256 totalBalance;                        // Total balance of this bet
 
     uint48 startBet;   // When the bet is available to play
     uint48 noMoreBets; // When the bet close(cant play anymore)
@@ -58,10 +58,10 @@ Send a call to the oracle to confirm the play
 
 The oracle set the winner of the bet
 
-If the player option is the win option, the player receives (playerBalance * totalBalance) / balanceOption
+If the player option is the win option, the player receives `(playerBalance * totalBalance) / balanceOption`
 If nobody win(draw) return the playerBalance
 If lose.... lose, no recibe anything
-The win and the draw also receive: rewards = (amount * minRate) / 10000
+The win and the draw also receive: `rewards = (amount * minRate) / 10000`
 
 ### Problems:
   - Each oracle of each bet, are centralized
