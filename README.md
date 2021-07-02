@@ -41,7 +41,7 @@ struct Bet {
 
 Haves a feeOwner(like a owner but with fee), how can:
     - Create rewarded bets
-    - Renounce to migrate(TODO)
+    - Renounce to migrate
     - Migrate to other PlayHouse
     - FeeOwner(dev) fee, 0% to 5% when play
     - Exclude addresses from fee
@@ -63,3 +63,8 @@ If the player option is the win option, the player receives (playerBalance * tot
 If nobody win(draw) return the playerBalance
 If lose.... lose, no recibe anything
 The win and the draw also receive: rewards = (amount * minRate) / 10000
+
+### Problems:
+    - Each oracle of each bet, are centralized
+    - The fee owner controls the migrate(can renounce)
+    - The fee owner controls mint of PLAY token
