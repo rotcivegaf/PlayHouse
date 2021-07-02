@@ -2,7 +2,6 @@
 [![Lint Status](https://github.com/rotcivegaf/PlayHouse/workflows/Lint/badge.svg)](https://github.com/rotcivegaf/PlayHouse/actions?query=workflow%3ALint)
 [![Test Status](https://github.com/rotcivegaf/PlayHouse/workflows/Test/badge.svg)](https://github.com/rotcivegaf/PlayHouse/actions?query=workflow%3ATest)
 [![Coverage Status](https://github.com/rotcivegaf/PlayHouse/workflows/Coverage/badge.svg)](https://github.com/rotcivegaf/PlayHouse/actions?query=workflow%3ACoverage)
-
 [![Coverage](https://codecov.io/gh/rotcivegaf/PlayHouse/graph/badge.svg)](https://codecov.io/gh/rotcivegaf/PlayHouse)
 
 A House where you can gambling with ERC20 tokens and receive PLAY token rewards for you play and your wins
@@ -10,11 +9,11 @@ A House where you can gambling with ERC20 tokens and receive PLAY token rewards 
 ## PlayToken(ERC20 reward token)
 
 Its a ERC20 token with:
-    - Governance
-    - Burn fee, 0% to 5%
-    - FeeOwner(dev) fee, 0% to 5%
-    - Mapping to exclude addresses from fee
-    - Mint used by the House contract to reward when play and collect a bet
+  - Governance
+  - Burn fee, 0% to 5%
+  - FeeOwner(dev) fee, 0% to 5%
+  - Mapping to exclude addresses from fee
+  - Mint used by the House contract to reward when play and collect a bet
 
 ## House(MasterChef and bet manager)
 
@@ -40,20 +39,20 @@ struct Bet {
 ```
 
 Haves a feeOwner(like a owner but with fee), how can:
-    - Create rewarded bets
-    - Renounce to migrate
-    - Migrate to other PlayHouse
-    - FeeOwner(dev) fee, 0% to 5% when play
-    - Exclude addresses from fee
+  - Create rewarded bets
+  - Renounce to migrate
+  - Migrate to other PlayHouse
+  - FeeOwner(dev) fee, 0% to 5% when play
+  - Exclude addresses from fee
 
 The bet start in create function, anyone can create a bet but if the bet is created by the feeOwner anyone who play can receive rewards in PlayToken
 Send a call to the oracle to confirm the create
 
 When the bet has started the players can play and the contract can mint PlayToken when before play, more tokens was mint in function of time between startBet(max rate reward) and noMoreBets(max rate reward):
-    deltaRate = maxRate - minRate
-    deltaTime = noMoreBets - startBet
-    rate = (deltaR / deltaT) * (noMoreBets - timestamp) + minRate
-    rewards = (amount * rate) / 10000
+  - `deltaRate = maxRate - minRate`
+  - `deltaTime = noMoreBets - startBet`
+  - `rate = (deltaR / deltaT) * (noMoreBets - timestamp) + minRate`
+  - `rewards = (amount * rate) / 10000`
 
 Send a call to the oracle to confirm the play
 
@@ -65,6 +64,6 @@ If lose.... lose, no recibe anything
 The win and the draw also receive: rewards = (amount * minRate) / 10000
 
 ### Problems:
-    - Each oracle of each bet, are centralized
-    - The fee owner controls the migrate(can renounce)
-    - The fee owner controls mint of PLAY token
+  - Each oracle of each bet, are centralized
+  - The fee owner controls the migrate(can renounce)
+  - The fee owner controls mint of PLAY token
