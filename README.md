@@ -1,4 +1,9 @@
 # PlayHouse
+[![Lint Status](https://github.com/rotcivegaf/PlayHouse/workflows/Lint/badge.svg)](https://github.com/rotcivegaf/PlayHouse/actions?query=workflow%3ALint)
+[![Test Status](https://github.com/rotcivegaf/PlayHouse/workflows/Test/badge.svg)](https://github.com/rotcivegaf/PlayHouse/actions?query=workflow%3ATest)
+[![Coverage Status](https://github.com/rotcivegaf/PlayHouse/workflows/Coverage/badge.svg)](https://github.com/rotcivegaf/PlayHouse/actions?query=workflow%3ACoverage)
+
+[![Coverage](https://codecov.io/gh/rotcivegaf/PlayHouse/graph/badge.svg)](https://codecov.io/gh/rotcivegaf/PlayHouse)
 
 A House where you can gambling with ERC20 tokens and receive PLAY token rewards for you play and your wins
 
