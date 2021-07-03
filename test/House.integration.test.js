@@ -19,7 +19,6 @@ const {
 contract('House Integration', (accounts) => {
   const owner = accounts[1];
   const feeOwner = accounts[2];
-  const creator = accounts[3];
 
   let house;
   let houseFeeRate;
