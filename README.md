@@ -67,3 +67,6 @@ The win and the draw also receive: `rewards = (amount * minRate) / 10000`
   - Each oracle of each bet, are centralized
   - The fee owner controls the migrate(can renounce)
   - The fee owner controls mint of PLAY token
+
+### TODOS
+  - Compound erc20
