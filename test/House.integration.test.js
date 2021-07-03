@@ -2,6 +2,7 @@ const House = artifacts.require('House.sol');
 const PlayToken = artifacts.require('PlayToken.sol');
 
 const TestERC20 = artifacts.require('TestERC20.sol');
+const TestBetOracle = artifacts.require('TestBetOracle.sol');
 
 const {
   expectRevert,
@@ -15,7 +16,7 @@ const {
   randombnBetween,
 } = require('./helpers.js');
 
-contract('House', (accounts) => {
+contract('House Integration', (accounts) => {
   const owner = accounts[1];
   const feeOwner = accounts[2];
   const creator = accounts[3];
@@ -26,6 +27,7 @@ contract('House', (accounts) => {
   let PLAYBurnRate;
   let PLAYFeeRate;
   let erc20;
+  let oracle;
 
   let BASE;
 
@@ -36,6 +38,9 @@ contract('House', (accounts) => {
   function toOption (str) {
     return toBytes32(web3.utils.asciiToHex(str));
   };
+
+  // For test oracle returns true
+  const RETURN_TRUE = toOption('TRUE');
 
   async function setApproveBalance (beneficiary, amount, houseAddress = house.address) {
     await erc20.setBalance(beneficiary, amount);
@@ -81,19 +86,19 @@ contract('House', (accounts) => {
     };
   }
 
-  function getId (startBet, noMoreBets, maxSetWinTime, minRate, maxRate) {
+  function getId (startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate) {
     return web3.utils.soliditySha3(
       { t: 'address', v: house.address },
       { t: 'address', v: feeOwner },
+      { t: 'address', v: oracle.address },
       { t: 'address', v: erc20.address },
-      { t: 'address', v: creator },
-      { t: 'uint48', v: startBet },
+      { t: 'uint48', v: startDecreaseRate },
       { t: 'uint48', v: noMoreBets },
       { t: 'uint48', v: maxSetWinTime },
       { t: 'uint48', v: minRate },
       { t: 'uint48', v: maxRate },
       { t: 'uint256', v: 0 },
-      { t: 'bytes', v: [] },
+      { t: 'bytes', v: RETURN_TRUE },
     );
   }
 
@@ -111,6 +116,7 @@ contract('House', (accounts) => {
     await PLAY.setFeeOwnerRate(PLAYFeeRate, { from: feeOwner });
 
     erc20 = await TestERC20.new({ from: owner });
+    oracle = await TestBetOracle.new(house.address, { from: owner });
   });
 
   // Cases
@@ -219,13 +225,12 @@ contract('House', (accounts) => {
   async function testCase (testCase) {
     const datas = processPlayer(testCase.players, testCase.winOption);
     const now = await time.latest();
-    const startBet = now.add(bn(1));
+    const startDecreaseRate = now;
     const noMoreBets = now.add(bn(300));
     const maxSetWinTime = now.add(bn(600));
 
-    const betId = getId(startBet, noMoreBets, maxSetWinTime, testCase.minRate, testCase.maxRate);
-    await house.create(erc20.address, creator, startBet, noMoreBets, maxSetWinTime, testCase.minRate, testCase.maxRate, 0, [], { from: feeOwner });
-    await time.increase(bn(2));
+    const betId = getId(startDecreaseRate, noMoreBets, maxSetWinTime, testCase.minRate, testCase.maxRate);
+    await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, testCase.minRate, testCase.maxRate, 0, RETURN_TRUE, { from: feeOwner });
 
     // Plays
     for (let i = 0; i < datas.players.length; i++) {
@@ -233,12 +238,12 @@ contract('House', (accounts) => {
 
       for (let j = 0; j < players.amountPlay.length; j++) {
         await setApproveBalance(players.address, players.amountPlay[j]);
-        await house.play(betId, players.amountPlay[j], players.option, [], { from: players.address });
+        await house.play(betId, players.amountPlay[j], players.option, RETURN_TRUE, { from: players.address });
       }
     }
 
     await time.increaseTo((await house.bets(betId)).noMoreBets.add(bn(1)));
-    await house.setWinOption(betId, datas.winOption, { from: creator });
+    await oracle.setWinOption(betId, datas.winOption);
 
     // Save and checks balances
     // const balGM = await erc20.balanceOf(house.address); // fails for the dust
@@ -258,7 +263,7 @@ contract('House', (accounts) => {
       if (option === datas.winOption) { // win
         await house.collect(
           betId,
-          [],
+          RETURN_TRUE,
           { from: player.address },
         );
         expect(await house.getBetBalanceOf(betId, player.address)).to.eq.BN(0);
@@ -266,7 +271,7 @@ contract('House', (accounts) => {
         await expectRevert(
           house.collect(
             betId,
-            [],
+            RETURN_TRUE,
             { from: player.address },
           ),
           'House::collect: The sender lose or not play',
@@ -275,7 +280,7 @@ contract('House', (accounts) => {
       } else { // draw
         await house.collect(
           betId,
-          [],
+          RETURN_TRUE,
           { from: player.address },
         );
         expect(await house.getBetBalanceOf(betId, player.address)).to.eq.BN(0);

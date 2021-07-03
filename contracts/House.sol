@@ -16,15 +16,15 @@ contract House is FeeOwnable, ReentrancyGuard {
     using Address for address;
 
     event Create(
+        IBetOracle indexed oracle,
         IERC20 indexed erc20,
-        address indexed oracle,
-        uint256 startBet,
+        uint256 startDecreaseRate,
         uint256 noMoreBets,
         uint256 maxSetWinTime,
         uint256 minRate,
         uint256 maxRate,
         uint256 salt,
-        bytes data
+        bytes oracleData
     );
 
     event Play(
@@ -32,25 +32,25 @@ contract House is FeeOwnable, ReentrancyGuard {
         uint256 amount,
         uint256 reward,
         bytes32 option,
-        bytes data
+        bytes oracleData
     );
 
-    event Collect(bytes32 indexed betId, uint256 amount, uint256 reward, bytes data);
+    event Collect(bytes32 indexed betId, uint256 amount, uint256 reward, bytes oracleData);
 
     event SetWinOption(bytes32 indexed betId, bytes32 option);
 
     event EmergencyWithdraw(bytes32 indexed betId, uint256 amount);
 
     struct Bet {
+        IBetOracle oracle;
         IERC20 erc20;
-        address oracle;
         mapping(address => uint256) balanceOf;
         mapping(bytes32 => uint256) optionBalanceOf;
         mapping(address => bytes32) optionOf;
         bytes32 winOption;
         uint256 totalBalance;
 
-        uint48 startBet;
+        uint48 startDecreaseRate;
         uint48 noMoreBets;
         uint48 setWinTime;
         uint48 minRate;
@@ -86,43 +86,42 @@ contract House is FeeOwnable, ReentrancyGuard {
     }
 
     function create(
-        IERC20  _erc20,
-        address _oracle,
-        uint48  _startBet,
-        uint48  _noMoreBets,
-        uint48  _maxSetWinTime,
-        uint48  _minRate,
-        uint48  _maxRate,
+        IBetOracle _oracle,
+        IERC20 _erc20,
+        uint48 _startDecreaseRate,
+        uint48 _noMoreBets,
+        uint48 _maxSetWinTime,
+        uint48 _minRate,
+        uint48 _maxRate,
         uint256 _salt,
-        bytes calldata _data
+        bytes calldata _oracleData
     ) external nonReentrant returns (bytes32 betId) {
         require(address(_erc20) != address(0), "House::create: The bet erc20 is invalid");
-        require(block.timestamp <= _startBet, "House::create: Wrong _startBet");
-        require(_startBet < _noMoreBets, "House::create: Wrong _noMoreBets");
+        require(_startDecreaseRate < _noMoreBets, "House::create: Wrong _noMoreBets");
         require(_noMoreBets < _maxSetWinTime, "House::create: Wrong _maxSetWinTime");
         require(_minRate <= _maxRate, "House::create: Wrong rates");
 
         betId = keccak256(abi.encodePacked(
             address(this),
             msg.sender,
-            _erc20,
             _oracle,
-            _startBet,
+            _erc20,
+            _startDecreaseRate,
             _noMoreBets,
             _maxSetWinTime,
             _minRate,
             _maxRate,
             _salt,
-            _data
+            _oracleData
         ));
 
-        require(bets[betId].oracle == address(0), "House::create: The bet is already create");
+        require(bets[betId].noMoreBets == 0, "House::create: The bet is already create");
 
         Bet storage bet = bets[betId];
-        bet.erc20 = _erc20;
         bet.oracle = _oracle;
+        bet.erc20 = _erc20;
 
-        bet.startBet = _startBet;
+        bet.startDecreaseRate = _startDecreaseRate;
         bet.noMoreBets = _noMoreBets;
         bet.setWinTime = _maxSetWinTime;
 
@@ -131,28 +130,23 @@ contract House is FeeOwnable, ReentrancyGuard {
             bet.maxRate = _maxRate;
         }
 
-        if (_oracle.isContract()) {
-            require(
-                IBetOracle(_oracle).create(msg.sender, _erc20, _oracle, _noMoreBets, _salt, _data),
-                "House::create: The bet oracle reject the create"
-            );
-        } else {
-            require(_oracle != address(0), "House::create: The bet oracle is invalid");
-        }
+        require(
+            _oracle.create(msg.sender, _erc20, _noMoreBets, _salt, _oracleData),
+            "House::create: The bet oracle reject the create"
+        );
 
-        emit Create(_erc20, _oracle, _startBet, _noMoreBets, _maxSetWinTime, _minRate, _maxRate, _salt, _data);
+        emit Create(_oracle, _erc20, _startDecreaseRate, _noMoreBets, _maxSetWinTime, _minRate, _maxRate, _salt, _oracleData);
     }
 
     function play(
         bytes32 _betId,
         uint256 _amount,
         bytes32 _option,
-        bytes calldata _data
+        bytes calldata _oracleData
     ) external nonReentrant {
         Bet storage bet = bets[_betId];
         uint256 timestamp = block.timestamp;
 
-        require(bet.startBet < timestamp, "House::play: The bet is not open, yet");
         require(timestamp < bet.noMoreBets, "House::play: The bet is closed or not exists");
         require(_amount != 0, "House::play: The amount should not be 0");
         require(_option != bytes32(0), "House::play: The option is invalid");
@@ -182,31 +176,30 @@ contract House is FeeOwnable, ReentrancyGuard {
             }
         }
 
-        if (bet.oracle.isContract()) {
-            require(
-                IBetOracle(bet.oracle).play(msg.sender, _betId, netAmount, _option, _data),
-                "House::play: The bet oracle reject the play"
-            );
-        }
+        require(
+            bet.oracle.play(msg.sender, _betId, netAmount, _option, _oracleData),
+            "House::play: The bet oracle reject the play"
+        );
 
-        emit Play(_betId, netAmount, rewardPlay, _option, _data);
+        emit Play(_betId, netAmount, rewardPlay, _option, _oracleData);
     }
 
     function setWinOption(bytes32 _betId, bytes32 _option) external {
         Bet storage bet = bets[_betId];
+        uint256 timestamp = block.timestamp;
 
-        require(msg.sender == bet.oracle, "House::setWinOption: The tx sender is invalid or not exists");
-        require(bet.noMoreBets <= block.timestamp, "House::setWinOption: The bet is not closed");
-        require(block.timestamp < bet.setWinTime, "House::setWinOption: The bet is in emergency or the win option was set");
+        require(msg.sender == address(bet.oracle), "House::setWinOption: The tx sender is invalid or not exists");
+        require(bet.noMoreBets <= timestamp, "House::setWinOption: The bet is not closed");
+        require(timestamp < bet.setWinTime, "House::setWinOption: The bet is in emergency or the win option was set");
         require(_option != bytes32(0), "House::setWinOption: The win option is invalid");
 
         bet.winOption = _option;
-        bet.setWinTime = uint32(block.timestamp);
+        bet.setWinTime = uint32(timestamp);
 
         emit SetWinOption(_betId, _option);
     }
 
-    function collect(bytes32 _betId, bytes calldata _data) external nonReentrant {
+    function collect(bytes32 _betId, bytes calldata _oracleData) external nonReentrant {
         Bet storage bet = bets[_betId];
 
         if (bet.winOption == bytes32(0) && block.timestamp >= bet.setWinTime) { // Bet is in emergency
@@ -248,14 +241,12 @@ contract House is FeeOwnable, ReentrancyGuard {
             }
         }
 
-        if (bet.oracle.isContract()) {
-            require(
-                IBetOracle(bet.oracle).collect(msg.sender, _betId, collectAmount, _data),
-                "House::collect: The bet oracle reject the collect"
-            );
-        }
+        require(
+            bet.oracle.collect(msg.sender, _betId, collectAmount, _oracleData),
+            "House::collect: The bet oracle reject the collect"
+        );
 
-        emit Collect(_betId, collectAmount, rewardCollect, _data);
+        emit Collect(_betId, collectAmount, rewardCollect, _oracleData);
     }
 
     // Only fee owner
@@ -274,7 +265,7 @@ contract House is FeeOwnable, ReentrancyGuard {
 
     function _getPlayRate(Bet storage _bet, uint256 _timestamp) internal view returns(uint256) {
         uint256 deltaR = _bet.maxRate - _bet.minRate;
-        uint256 deltaT = _bet.noMoreBets - _bet.startBet;
+        uint256 deltaT = _bet.noMoreBets - _bet.startDecreaseRate;
         return (deltaR / deltaT) * (_bet.noMoreBets - _timestamp) + _bet.minRate;
     }
 }

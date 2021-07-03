@@ -30,11 +30,11 @@ struct Bet {
     bytes32 winOption;                           // The win option of the bet
     uint256 totalBalance;                        // Total balance of this bet
 
-    uint48 startBet;   // When the bet is available to play
-    uint48 noMoreBets; // When the bet close(cant play anymore)
-    uint48 setWinTime; // The max time how have the oracle to set the winner and if set a winner, the set time
-    uint48 minRate;    // The min rate reward
-    uint48 maxRate;    // The max rate reward
+    uint48 startDecreaseRate; // When the reward rate start decrease
+    uint48 noMoreBets;        // When the bet close(cant play anymore)
+    uint48 setWinTime;        // The max time how have the oracle to set the winner and if set a winner, the set time
+    uint48 minRate;           // The min rate reward
+    uint48 maxRate;           // The max rate reward
 }
 ```
 
@@ -48,9 +48,9 @@ Haves a feeOwner(like a owner but with fee), how can:
 The bet start in create function, anyone can create a bet but if the bet is created by the feeOwner anyone who play can receive rewards in PlayToken
 Send a call to the oracle to confirm the create
 
-When the bet has started the players can play and the contract can mint PlayToken when before play, more tokens was mint in function of time between startBet(max rate reward) and noMoreBets(max rate reward):
+When the bet has started the players can play and the contract can mint PlayToken when before play, more tokens was mint in function of time between startDecreaseRate(max rate reward) and noMoreBets(max rate reward):
   - `deltaRate = maxRate - minRate`
-  - `deltaTime = noMoreBets - startBet`
+  - `deltaTime = noMoreBets - startDecreaseRate`
   - `rate = (deltaR / deltaT) * (noMoreBets - timestamp) + minRate`
   - `rewards = (amount * rate) / 10000`
 
