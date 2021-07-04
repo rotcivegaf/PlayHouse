@@ -85,18 +85,19 @@ contract('House Integration', (accounts) => {
     };
   }
 
-  function getId (startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate) {
+  function getId (minPlayAmount, minPlayAmountRateIncrease, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate) {
     return web3.utils.soliditySha3(
       { t: 'address', v: house.address },
       { t: 'address', v: feeOwner },
       { t: 'address', v: oracle.address },
       { t: 'address', v: erc20.address },
+      { t: 'uint208', v: minPlayAmount },
+      { t: 'uint48', v: minPlayAmountRateIncrease },
       { t: 'uint48', v: startDecreaseRate },
       { t: 'uint48', v: noMoreBets },
       { t: 'uint48', v: maxSetWinTime },
       { t: 'uint48', v: minRate },
       { t: 'uint48', v: maxRate },
-      { t: 'uint256', v: 0 },
       { t: 'bytes', v: RETURN_TRUE },
     );
   }
@@ -227,9 +228,11 @@ contract('House Integration', (accounts) => {
     const startDecreaseRate = now;
     const noMoreBets = now.add(bn(300));
     const maxSetWinTime = now.add(bn(600));
+    const minPlayAmount = bn(1000000);
+    const minPlayAmountRateIncrease = bn(0);
 
-    const betId = getId(startDecreaseRate, noMoreBets, maxSetWinTime, testCase.minRate, testCase.maxRate);
-    await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, testCase.minRate, testCase.maxRate, 0, RETURN_TRUE, { from: feeOwner });
+    const betId = getId(minPlayAmount, minPlayAmountRateIncrease, startDecreaseRate, noMoreBets, maxSetWinTime, testCase.minRate, testCase.maxRate);
+    await house.create(oracle.address, erc20.address, minPlayAmount, minPlayAmountRateIncrease, startDecreaseRate, noMoreBets, maxSetWinTime, testCase.minRate, testCase.maxRate, RETURN_TRUE, { from: feeOwner });
 
     // Plays
     for (let i = 0; i < datas.players.length; i++) {
@@ -300,10 +303,7 @@ contract('House Integration', (accounts) => {
       else if (datas.optionBalances[datas.winOption])  // lose
         expect(await erc20.balanceOf(player.address)).to.eq.BN(datas.expects[i].prevPlayerBalance);
       else  // draw
-        expect(await erc20.balanceOf(player.address)).to.eq.BN(datas.expects[i].prevPlayerBalance.add(
-          datas.expects[i].betPlayerBalance,
-        ),
-        );
+        expect(await erc20.balanceOf(player.address)).to.eq.BN(datas.expects[i].prevPlayerBalance.add(datas.expects[i].betPlayerBalance));
     }
   }
 });

@@ -30,6 +30,9 @@ struct Bet {
     bytes32 winOption;                           // The win option of the bet
     uint256 totalBalance;                        // Total balance of this bet
 
+    uint208 minPlayAmount;             // The min amount to play
+    uint48  minPlayAmountRateIncrease; // The rate increase of minPlayAmount
+
     uint48 startDecreaseRate; // When the reward rate start decrease
     uint48 noMoreBets;        // When the bet close(cant play anymore)
     uint48 setWinTime;        // The max time how have the oracle to set the winner and if set a winner, the set time
@@ -54,7 +57,7 @@ When the bet has started the players can play and the contract can mint PlayToke
   - `rate = (deltaR / deltaT) * (noMoreBets - timestamp) + minRate`
   - `rewards = (amount * rate) / 10000`
 
-Send a call to the oracle to confirm the play
+Send a call to the oracle to confirm the play, also there are a minimum amount to Play a bet and this minimum is increase with minPlayAmountRateIncrease every play
 
 The oracle set the winner of the bet
 

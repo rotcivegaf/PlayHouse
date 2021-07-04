@@ -18,12 +18,13 @@ contract House is FeeOwnable, ReentrancyGuard {
     event Create(
         IBetOracle indexed oracle,
         IERC20 indexed erc20,
+        uint256 minPlayAmount,
+        uint256 minPlayAmountRateIncrease,
         uint256 startDecreaseRate,
         uint256 noMoreBets,
         uint256 maxSetWinTime,
         uint256 minRate,
         uint256 maxRate,
-        uint256 salt,
         bytes oracleData
     );
 
@@ -49,6 +50,9 @@ contract House is FeeOwnable, ReentrancyGuard {
         mapping(address => bytes32) optionOf;
         bytes32 winOption;
         uint256 totalBalance;
+
+        uint208 minPlayAmount;
+        uint48  minPlayAmountRateIncrease;
 
         uint48 startDecreaseRate;
         uint48 noMoreBets;
@@ -88,12 +92,13 @@ contract House is FeeOwnable, ReentrancyGuard {
     function create(
         IBetOracle _oracle,
         IERC20 _erc20,
+        uint208 _minPlayAmount,
+        uint48 _minPlayAmountRateIncrease,
         uint48 _startDecreaseRate,
         uint48 _noMoreBets,
         uint48 _maxSetWinTime,
         uint48 _minRate,
         uint48 _maxRate,
-        uint256 _salt,
         bytes calldata _oracleData
     ) external nonReentrant returns (bytes32 betId) {
         require(address(_erc20) != address(0), "House::create: The bet erc20 is invalid");
@@ -106,12 +111,13 @@ contract House is FeeOwnable, ReentrancyGuard {
             msg.sender,
             _oracle,
             _erc20,
+            _minPlayAmount,
+            _minPlayAmountRateIncrease,
             _startDecreaseRate,
             _noMoreBets,
             _maxSetWinTime,
             _minRate,
             _maxRate,
-            _salt,
             _oracleData
         ));
 
@@ -120,6 +126,9 @@ contract House is FeeOwnable, ReentrancyGuard {
         Bet storage bet = bets[betId];
         bet.oracle = _oracle;
         bet.erc20 = _erc20;
+
+        bet.minPlayAmount = _minPlayAmount;
+        bet.minPlayAmountRateIncrease = _minPlayAmountRateIncrease;
 
         bet.startDecreaseRate = _startDecreaseRate;
         bet.noMoreBets = _noMoreBets;
@@ -131,11 +140,11 @@ contract House is FeeOwnable, ReentrancyGuard {
         }
 
         require(
-            _oracle.create(msg.sender, _erc20, _noMoreBets, _salt, _oracleData),
+            _oracle.create(msg.sender, _erc20, _minPlayAmount, _minPlayAmountRateIncrease, _startDecreaseRate, _noMoreBets, _maxSetWinTime, _minRate, _maxRate, _oracleData),
             "House::create: The bet oracle reject the create"
         );
 
-        emit Create(_oracle, _erc20, _startDecreaseRate, _noMoreBets, _maxSetWinTime, _minRate, _maxRate, _salt, _oracleData);
+        emit Create(_oracle, _erc20, _minPlayAmount, _minPlayAmountRateIncrease, _startDecreaseRate, _noMoreBets, _maxSetWinTime, _minRate, _maxRate, _oracleData);
     }
 
     function play(
@@ -148,7 +157,7 @@ contract House is FeeOwnable, ReentrancyGuard {
         uint256 timestamp = block.timestamp;
 
         require(timestamp < bet.noMoreBets, "House::play: The bet is closed or not exists");
-        require(_amount != 0, "House::play: The amount should not be 0");
+        require(_amount != 0 && _amount >= bet.minPlayAmount, "House::play: Low amount");
         require(_option != bytes32(0), "House::play: The option is invalid");
         require(bet.optionOf[msg.sender] == bytes32(0) || bet.optionOf[msg.sender] == _option, "House::play: The option cant change");
 
@@ -167,6 +176,7 @@ contract House is FeeOwnable, ReentrancyGuard {
         bet.balanceOf[msg.sender] += netAmount;
         bet.optionBalanceOf[_option] += netAmount;
         bet.optionOf[msg.sender] = _option;
+        bet.minPlayAmount += uint208(_getRateAmount(netAmount, bet.minPlayAmountRateIncrease));
 
         uint256 rewardPlay;
         if (address(PLAY) != address(0)) {

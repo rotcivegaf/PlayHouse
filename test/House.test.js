@@ -15,7 +15,6 @@ const {
   expect,
   bn,
   toBytes32,
-  random32bn,
   randombnBetween,
 } = require('./helpers.js');
 
@@ -36,7 +35,7 @@ contract('House', (accounts) => {
 
   const balances = {};
 
-  function toFee (amount, feeRate) {
+  function getRateAmount (amount, feeRate) {
     return amount.mul(feeRate).div(BASE);
   };
 
@@ -56,11 +55,11 @@ contract('House', (accounts) => {
 
     expect(rate).to.eq.BN(await house.getPlayRate(betId, now));
 
-    return toFee(amount, rate);
+    return getRateAmount(amount, rate);
   };
 
   async function getRewardCollectAmount (betId, amount, _house = house) {
-    return toFee(amount, (await _house.bets(betId)).minRate);
+    return getRateAmount(amount, (await _house.bets(betId)).minRate);
   };
 
   function toOption (str) {
@@ -89,20 +88,87 @@ contract('House', (accounts) => {
     balances.PLAY.player1 = await PLAY.balanceOf(player1);
   }
 
-  function getId (sender, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, oracleData, houseAddress = house.address) {
+  function getId (params) {
     return web3.utils.soliditySha3(
-      { t: 'address', v: houseAddress },
-      { t: 'address', v: sender },
-      { t: 'address', v: oracle.address },
-      { t: 'address', v: erc20.address },
-      { t: 'uint48', v: startDecreaseRate },
-      { t: 'uint48', v: noMoreBets },
-      { t: 'uint48', v: maxSetWinTime },
-      { t: 'uint48', v: minRate },
-      { t: 'uint48', v: maxRate },
-      { t: 'uint256', v: salt },
-      { t: 'bytes', v: oracleData },
+      { t: 'address', v: params.house.address },
+      { t: 'address', v: params.creator },
+      { t: 'address', v: params.oracle.address },
+      { t: 'address', v: params.erc20.address },
+      { t: 'uint208', v: params.minPlayAmount },
+      { t: 'uint48', v: params.minPlayAmountRateIncrease },
+      { t: 'uint48', v: params.startDecreaseRate },
+      { t: 'uint48', v: params.noMoreBets },
+      { t: 'uint48', v: params.maxSetWinTime },
+      { t: 'uint48', v: params.minRate },
+      { t: 'uint48', v: params.maxRate },
+      { t: 'bytes', v: params.oracleData },
     );
+  }
+
+  async function createBet (params = {}) {
+    const now = await time.latest();
+
+    // Set default params if undefined
+    if (!params.house) params.house = house;
+    if (!params.creator) params.creator = creator;
+
+    if (!params.oracle) params.oracle = oracle;
+    if (!params.erc20) params.erc20 = erc20;
+    if (!params.minPlayAmount) params.minPlayAmount = bn(0);
+    if (!params.minPlayAmountRateIncrease) params.minPlayAmountRateIncrease = bn(0);
+    if (!params.startDecreaseRate) params.startDecreaseRate = bn(0);
+    if (!params.noMoreBets) params.noMoreBets = now.add(bn(30));
+    if (!params.maxSetWinTime) params.maxSetWinTime = now.add(bn(60));
+    if (!params.minRate) params.minRate = bn(0);
+    if (!params.maxRate) params.maxRate = bn(0);
+    if (!params.oracleData) params.oracleData = RETURN_TRUE;
+
+    expectEvent(
+      await params.house.create(
+        params.oracle.address,            // oracle
+        params.erc20.address,             // erc20
+        params.minPlayAmount,             // minPlayAmount
+        params.minPlayAmountRateIncrease, // minPlayAmountRateIncrease
+        params.startDecreaseRate,         // startDecreaseRate
+        params.noMoreBets,                // noMoreBets
+        params.maxSetWinTime,             // maxSetWinTime
+        params.minRate,                   // minRate
+        params.maxRate,                   // maxRate
+        params.oracleData,                // oracle data
+        { from: params.creator },
+      ),
+      'Create',
+      {
+        oracle: params.oracle.address,
+        erc20: params.erc20.address,
+        minPlayAmount: params.minPlayAmount,
+        minPlayAmountRateIncrease: params.minPlayAmountRateIncrease,
+        startDecreaseRate: params.startDecreaseRate,
+        noMoreBets: params.noMoreBets,
+        maxSetWinTime: params.maxSetWinTime,
+        minRate: params.minRate,
+        maxRate: params.maxRate,
+        oracleData: params.oracleData,
+      },
+    );
+
+    const betId = getId(params);
+
+    // Checks
+    const bet = await params.house.bets(betId);
+    assert.equal(bet.oracle, params.oracle.address);
+    assert.equal(bet.erc20, params.erc20.address);
+    assert.equal(bet.winOption, constants.ZERO_BYTES32);
+    expect(bet.totalBalance).to.eq.BN(0);
+    expect(bet.minPlayAmount).to.eq.BN(params.minPlayAmount);
+    expect(bet.minPlayAmountRateIncrease).to.eq.BN(params.minPlayAmountRateIncrease);
+    expect(bet.startDecreaseRate).to.eq.BN(params.startDecreaseRate);
+    expect(bet.noMoreBets).to.eq.BN(params.noMoreBets);
+    expect(bet.setWinTime).to.eq.BN(params.maxSetWinTime);
+    expect(bet.minRate).to.eq.BN(params.minRate);
+    expect(bet.maxRate).to.eq.BN(params.maxRate);
+
+    return betId;
   }
 
   before('Deploy House', async () => {
@@ -123,98 +189,19 @@ contract('House', (accounts) => {
   });
   describe('Functions create', () => {
     it('Create a bet', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-
-      expectEvent(
-        await house.create(
-          oracle.address,    // oracle
-          erc20.address,     // erc20
-          startDecreaseRate, // startDecreaseRate
-          noMoreBets,        // noMoreBets
-          maxSetWinTime,     // maxSetWinTime
-          0,                 // minRate
-          0,                 // maxRate
-          0,                 // salt
-          RETURN_TRUE,       // oracle data
-          { from: creator },
-        ),
-        'Create',
-        {
-          oracle: oracle.address,
-          erc20: erc20.address,
-          startDecreaseRate: startDecreaseRate,
-          noMoreBets: noMoreBets,
-          maxSetWinTime: maxSetWinTime,
-          minRate: bn(0),
-          maxRate: bn(0),
-          salt: bn(0),
-          oracleData: RETURN_TRUE,
-        },
-      );
-
-      const bet = await house.bets(getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, 0, RETURN_TRUE));
-      assert.equal(bet.oracle, oracle.address);
-      assert.equal(bet.erc20, erc20.address);
-      expect(bet.totalBalance).to.eq.BN(0);
-      assert.equal(bet.winOption, constants.ZERO_BYTES32);
-      expect(bet.startDecreaseRate).to.eq.BN(startDecreaseRate);
-      expect(bet.noMoreBets).to.eq.BN(noMoreBets);
-      expect(bet.setWinTime).to.eq.BN(maxSetWinTime);
-      expect(bet.minRate).to.eq.BN(0);
-      expect(bet.maxRate).to.eq.BN(0);
+      await createBet();
     });
-    it('Create a bet with minRate and maxRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const minRate = bn(100);
-      const maxRate = bn(1000);
-
-      expectEvent(
-        await house.create(
-          oracle.address,     // oracle
-          erc20.address,      // erc20
-          startDecreaseRate,  // startDecreaseRate
-          noMoreBets,         // noMoreBets
-          maxSetWinTime,      // maxSetWinTime
-          minRate,            // minRate
-          maxRate,            // maxRate
-          0,                  // salt
-          RETURN_TRUE,        // oracle data
-          { from: feeOwner },
-        ),
-        'Create',
-        {
-          oracle: oracle.address,
-          erc20: erc20.address,
-          startDecreaseRate: startDecreaseRate,
-          noMoreBets: noMoreBets,
-          maxSetWinTime: maxSetWinTime,
-          minRate: minRate,
-          maxRate: maxRate,
-          salt: bn(0),
-          oracleData: RETURN_TRUE,
-        },
-      );
-
-      const bet = await house.bets(getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, 0, RETURN_TRUE));
-      assert.equal(bet.oracle, oracle.address);
-      assert.equal(bet.erc20, erc20.address);
-      expect(bet.totalBalance).to.eq.BN(0);
-      assert.equal(bet.winOption, constants.ZERO_BYTES32);
-      expect(bet.startDecreaseRate).to.eq.BN(startDecreaseRate);
-      expect(bet.noMoreBets).to.eq.BN(noMoreBets);
-      expect(bet.setWinTime).to.eq.BN(maxSetWinTime);
-      expect(bet.minRate).to.eq.BN(minRate);
-      expect(bet.maxRate).to.eq.BN(maxRate);
+    it('Create a bet with all params', async () => {
+      await createBet({
+        creator: feeOwner,
+        minPlayAmount: bn(100),
+        minPlayAmountRateIncrease: bn(100),
+        minRate: bn(100),
+        maxRate: bn(1000),
+      });
     });
     it('Try create a bet with minRate and maxRate without fee ownership', async () => {
       const now = await time.latest();
-      const startDecreaseRate = now;
       const noMoreBets = now.add(bn(30));
       const maxSetWinTime = now.add(bn(60));
       const minRate = bn(100);
@@ -222,32 +209,36 @@ contract('House', (accounts) => {
 
       expectEvent(
         await house.create(
-          oracle.address,    // oracle
-          erc20.address,     // erc20
-          startDecreaseRate, // startDecreaseRate
-          noMoreBets,        // noMoreBets
-          maxSetWinTime,     // maxSetWinTime
-          minRate,           // minRate
-          maxRate,           // maxRate
-          0,                 // salt
-          RETURN_TRUE,       // oracle data
+          oracle.address, // oracle
+          erc20.address,  // erc20
+          0,              // minPlayAmount
+          0,              // minPlayAmountRateIncrease
+          0,              // startDecreaseRate
+          noMoreBets,     // noMoreBets
+          maxSetWinTime,  // maxSetWinTime
+          minRate,        // minRate
+          maxRate,        // maxRate
+          RETURN_TRUE,    // oracle data
           { from: creator },
         ),
         'Create',
-        {
-          oracle: oracle.address,
-          erc20: erc20.address,
-          startDecreaseRate: startDecreaseRate,
-          noMoreBets: noMoreBets,
-          maxSetWinTime: maxSetWinTime,
-          minRate: minRate,
-          maxRate: maxRate,
-          salt: bn(0),
-          oracleData: RETURN_TRUE,
-        },
+        { minRate: minRate, maxRate: maxRate},
       );
 
-      const bet = await house.bets(getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, 0, RETURN_TRUE));
+      const bet = await house.bets(web3.utils.soliditySha3(
+        { t: 'address', v: house.address },
+        { t: 'address', v: creator },
+        { t: 'address', v: oracle.address },
+        { t: 'address', v: erc20.address },
+        { t: 'uint208', v: 0 },
+        { t: 'uint48', v: 0 },
+        { t: 'uint48', v: 0 },
+        { t: 'uint48', v: noMoreBets },
+        { t: 'uint48', v: maxSetWinTime },
+        { t: 'uint48', v: minRate },
+        { t: 'uint48', v: maxRate },
+        { t: 'bytes', v: RETURN_TRUE },
+      ));
       expect(bet.minRate).to.eq.BN(0);
       expect(bet.maxRate).to.eq.BN(0);
     });
@@ -258,12 +249,13 @@ contract('House', (accounts) => {
         house.create(
           creator,                // oracle
           constants.ZERO_ADDRESS, // erc20
+          0,                      // minPlayAmount
+          0,                      // minPlayAmountRateIncrease
           now,                    // startDecreaseRate
           now.add(bn(30)),        // noMoreBets
           now.add(bn(60)),        // maxSetWinTime
           0,                      // minRate
           0,                      // maxRate
-          random32bn(),           // salt
           RETURN_TRUE,            // oracle data
         ),
         'House::create: The bet erc20 is invalid',
@@ -276,12 +268,13 @@ contract('House', (accounts) => {
         house.create(
           creator,         // oracle
           erc20.address,   // erc20
+          0,               // minPlayAmount
+          0,               // minPlayAmountRateIncrease
           now.add(bn(30)), // startDecreaseRate
           now.add(bn(30)), // noMoreBets
           now.add(bn(60)), // maxSetWinTime
           0,               // minRate
           0,               // maxRate
-          random32bn(),    // salt
           RETURN_TRUE,     // oracle data
         ),
         'House::create: Wrong _noMoreBets',
@@ -294,12 +287,13 @@ contract('House', (accounts) => {
         house.create(
           creator,         // oracle
           erc20.address,   // erc20
+          0,               // minPlayAmount
+          0,               // minPlayAmountRateIncrease
           now.add(bn(1)),  // startDecreaseRate
           now.add(bn(30)), // noMoreBets
           now.add(bn(30)), // maxSetWinTime
           0,               // minRate
           0,               // maxRate
-          random32bn(),    // salt
           RETURN_TRUE,     // oracle data
         ),
         'House::create: Wrong _maxSetWinTime',
@@ -312,87 +306,72 @@ contract('House', (accounts) => {
         house.create(
           creator,         // oracle
           erc20.address,   // erc20
+          0,               // minPlayAmount
+          0,               // minPlayAmountRateIncrease
           now.add(bn(1)),  // startDecreaseRate
           now.add(bn(30)), // noMoreBets
           now.add(bn(60)), // maxSetWinTime
           1,               // minRate
           0,               // maxRate
-          random32bn(),    // salt
           RETURN_TRUE,     // oracle data
         ),
         'House::create: Wrong rates',
       );
     });
     it('Try create two identical bets', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now.add(bn(5));
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-
-      await house.create(
-        oracle.address,    // oracle
-        erc20.address,     // erc20
-        startDecreaseRate, // startDecreaseRate
-        noMoreBets,        // noMoreBets
-        maxSetWinTime,     // maxSetWinTime
-        0,                 // minRate
-        0,                 // maxRate
-        5,                 // salt
-        RETURN_TRUE,       // oracle data
-      );
+      const betId = await createBet();
+      const bet = await house.bets(betId);
 
       await expectRevert(
         house.create(
-          oracle.address,    // oracle
-          erc20.address,     // erc20
-          startDecreaseRate, // startDecreaseRate
-          noMoreBets,        // noMoreBets
-          maxSetWinTime,     // maxSetWinTime
-          0,                 // minRate
-          0,                 // maxRate
-          5,                 // salt
-          RETURN_TRUE,       // oracle data
+          oracle.address,        // oracle
+          erc20.address,         // erc20
+          0,                     // minPlayAmount
+          0,                     // minPlayAmountRateIncrease
+          bet.startDecreaseRate, // startDecreaseRate
+          bet.noMoreBets,        // noMoreBets
+          bet.setWinTime,        // maxSetWinTime
+          0,                     // minRate
+          0,                     // maxRate
+          RETURN_TRUE,           // oracle data
+          { from: creator },
         ),
         'House::create: The bet is already create',
       );
     });
     it('Try create a bet with and oracle rejects the create', async () => {
       const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
 
       await expectRevert(
         house.create(
-          oracle.address,    // oracle
-          erc20.address,     // erc20
-          startDecreaseRate, // startDecreaseRate
-          noMoreBets,        // noMoreBets
-          maxSetWinTime,     // maxSetWinTime
-          0,                 // minRate
-          0,                 // maxRate
-          random32bn(),      // salt
-          [],                // oracle data
+          oracle.address,  // oracle
+          erc20.address,   // erc20
+          0,               // minPlayAmount
+          0,               // minPlayAmountRateIncrease
+          now,             // startDecreaseRate
+          now.add(bn(30)), // noMoreBets
+          now.add(bn(60)), // maxSetWinTime
+          0,               // minRate
+          0,               // maxRate
+          [],              // oracle data
         ),
         'House::create: The bet oracle reject the create',
       );
     });
     it('Try create a bet with address 0 as oracle', async () => {
       const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
 
       await expectRevert(
         house.create(
           constants.ZERO_ADDRESS, // oracle
           erc20.address,          // erc20
-          startDecreaseRate,      // startDecreaseRate
-          noMoreBets,             // noMoreBets
-          maxSetWinTime,          // maxSetWinTime
+          0,                      // minPlayAmount
+          0,                      // minPlayAmountRateIncrease
+          now,                    // startDecreaseRate
+          now.add(bn(30)),        // noMoreBets
+          now.add(bn(60)),        // maxSetWinTime
           0,                      // minRate
           0,                      // maxRate
-          random32bn(),           // salt
           RETURN_TRUE,            // oracle data
         ),
         'Transaction reverted: function call to a non-contract account',
@@ -401,16 +380,10 @@ contract('House', (accounts) => {
   });
   describe('Function play', () => {
     it('Play a bet', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet({ creator: feeOwner });
 
       await setApproveBalance(player1, amount);
 
@@ -457,18 +430,12 @@ contract('House', (accounts) => {
       const feeRate = randombnBetween(1, 500);
       await house.setFeeOwnerRate(feeRate, { from: feeOwner });
 
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
-      const feeAmount = await toFee(amount, feeRate);
+      const feeAmount = await getRateAmount(amount, feeRate);
       const netAmount = amount.sub(feeAmount);
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await setApproveBalance(player1, amount);
 
@@ -518,16 +485,10 @@ contract('House', (accounts) => {
       await house.setFeeOwnerRate(feeRate, { from: feeOwner });
       await house.setExcludeFromFee(erc20.address, true, { from: feeOwner });
 
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet({ creator: feeOwner });
 
       await setApproveBalance(player1, amount);
 
@@ -573,19 +534,94 @@ contract('House', (accounts) => {
       await house.setFeeOwnerRate(bn(0), { from: feeOwner });
       await house.setExcludeFromFee(erc20.address, false, { from: feeOwner });
     });
+    it('Play a bet with minPlayAmount', async () => {
+      const minPlayAmount = bn(web3.utils.randomHex(8));
+      const option = toOption('A');
+
+      const betId = await createBet({ creator: feeOwner, minPlayAmount });
+
+      await setApproveBalance(player1, minPlayAmount);
+
+      await saveBalances();
+
+      expectEvent(
+        await house.play(
+          betId,
+          minPlayAmount,
+          option,
+          RETURN_TRUE,
+          { from: player1 },
+        ),
+        'Play',
+        {
+          betId: betId,
+          amount: minPlayAmount,
+          reward: bn(0),
+          option: option,
+          oracleData: RETURN_TRUE,
+        },
+      );
+
+      const bet = await house.bets(betId);
+      expect(bet.totalBalance).to.eq.BN(minPlayAmount);
+      expect(bet.minPlayAmount).to.eq.BN(minPlayAmount);
+
+      expect(await house.getBetBalanceOf(betId, player1)).to.eq.BN(minPlayAmount);
+      assert.equal(await house.getBetOptionOf(betId, player1), option);
+      expect(await house.getBetOptionBalance(betId, option)).to.eq.BN(minPlayAmount);
+
+      // Check ERC20 balance
+      expect(await erc20.balanceOf(house.address)).to.eq.BN(balances.erc20.house.add(minPlayAmount));
+      expect(await erc20.balanceOf(owner)).to.eq.BN(balances.erc20.owner);
+      expect(await erc20.balanceOf(feeOwner)).to.eq.BN(balances.erc20.feeOwner);
+      expect(await erc20.balanceOf(player1)).to.eq.BN(balances.erc20.player1.sub(minPlayAmount));
+
+      // Check PLAY balance
+      expect(await PLAY.balanceOf(house.address)).to.eq.BN(balances.PLAY.house);
+      expect(await PLAY.balanceOf(owner)).to.eq.BN(balances.PLAY.owner);
+      expect(await PLAY.balanceOf(feeOwner)).to.eq.BN(balances.PLAY.feeOwner);
+      expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1);
+    });
+    it('Play a bet with minPlayAmount and minPlayAmountRateIncrease', async () => {
+      const minPlayAmount = bn(web3.utils.randomHex(8));
+      const minPlayAmountRateIncrease = randombnBetween(1, 3000);
+      const option = toOption('A');
+
+      const betId = await createBet({ creator: feeOwner, minPlayAmount, minPlayAmountRateIncrease });
+
+      await setApproveBalance(player1, minPlayAmount);
+
+      await saveBalances();
+
+      expectEvent(
+        await house.play(
+          betId,
+          minPlayAmount,
+          option,
+          RETURN_TRUE,
+          { from: player1 },
+        ),
+        'Play',
+        {
+          betId: betId,
+          amount: minPlayAmount,
+          reward: bn(0),
+          option: option,
+          oracleData: RETURN_TRUE,
+        },
+      );
+
+      const bet = await house.bets(betId);
+      expect(bet.totalBalance).to.eq.BN(minPlayAmount);
+      expect(bet.minPlayAmount).to.eq.BN(minPlayAmount.add(getRateAmount(minPlayAmount, minPlayAmountRateIncrease)));
+    });
     it('Play a bet with equal minRate and maxRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
       const minRate = bn(10000);
       const maxRate = bn(10000);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner, minRate, maxRate });
 
       await setApproveBalance(player1, amount);
 
@@ -632,18 +668,10 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1.add(rewardAmount));
     });
     it('Play a bet with 0 minRate and 0 maxRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const minRate = bn(0);
-      const maxRate = bn(0);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner });
 
       await setApproveBalance(player1, amount);
 
@@ -690,18 +718,11 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1.add(rewardAmount));
     });
     it('Play a bet with minRate and 0 maxRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const minRate = bn(0);
       const maxRate = bn(10000);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner, maxRate });
 
       await setApproveBalance(player1, amount);
 
@@ -748,18 +769,12 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1.add(rewardAmount));
     });
     it('Play a bet with minRate and maxRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
       const minRate = bn(10000);
       const maxRate = bn(20000);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner, minRate, maxRate });
 
       await setApproveBalance(player1, amount);
 
@@ -806,18 +821,12 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1.add(rewardAmount));
     });
     it('Play a bet with maxRate and foward startDecreaseRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now.add(bn(15));
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
       const minRate = bn(10000);
       const maxRate = bn(20000);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner, minRate, maxRate });
 
       await setApproveBalance(player1, amount);
 
@@ -869,18 +878,12 @@ contract('House', (accounts) => {
       const _PLAY = await PlayToken.at(await _house.PLAY());
       await _house.migrate(owner, { from: feeOwner });
 
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
       const minRate = bn(10000);
       const maxRate = bn(20000);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, _house.address);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await _house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ house: _house, creator: feeOwner, minRate, maxRate });
 
       await setApproveBalance(player1, amount, _house.address);
 
@@ -943,14 +946,7 @@ contract('House', (accounts) => {
       );
     });
     it('Try play an expired bet', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now.add(bn(10));
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
-
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await time.increaseTo((await house.bets(betId)).noMoreBets);
 
@@ -964,15 +960,8 @@ contract('House', (accounts) => {
         'House::play: The bet is closed or not exists',
       );
     });
-    it('Try play 0 amount in a bet', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
-
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+    it('Try play with low amount', async () => {
+      const betId = await createBet();
 
       await expectRevert(
         house.play(
@@ -981,18 +970,23 @@ contract('House', (accounts) => {
           constants.ZERO_BYTES32,
           RETURN_TRUE,
         ),
-        'House::play: The amount should not be 0',
+        'House::play: Low amount',
+      );
+
+      const betId2 = await createBet({ minPlayAmount: bn(10) });
+
+      await expectRevert(
+        house.play(
+          betId2,
+          bn(9),
+          constants.ZERO_BYTES32,
+          RETURN_TRUE,
+        ),
+        'House::play: Low amount',
       );
     });
     it('Try play a bet with two different options', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
-
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await setApproveBalance(creator, 11);
       await house.play(betId, 10, toOption('A'), RETURN_TRUE, { from: creator });
@@ -1009,14 +1003,7 @@ contract('House', (accounts) => {
       );
     });
     it('Try play a bet with invalid option', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
-
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await expectRevert(
         house.play(
@@ -1029,14 +1016,7 @@ contract('House', (accounts) => {
       );
     });
     it('Try play a bet with invalid option(change option)', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
-
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await setApproveBalance(creator, 11);
       await house.play(betId, 10, toOption('A'), RETURN_TRUE, { from: creator });
@@ -1053,14 +1033,7 @@ contract('House', (accounts) => {
       );
     });
     it('Try play a bet and oracle rejects the play', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
-
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await setApproveBalance(creator, 1);
 
@@ -1076,14 +1049,7 @@ contract('House', (accounts) => {
       );
     });
     it('Try play a bet without have erc20 balance', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
-
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await expectRevert(
         house.play(
@@ -1098,15 +1064,9 @@ contract('House', (accounts) => {
   });
   describe('Function setWinOption', () => {
     it('Set the win option in a bet', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await time.increaseTo((await house.bets(betId)).noMoreBets);
 
@@ -1131,14 +1091,7 @@ contract('House', (accounts) => {
       );
     });
     it('Try set the win option without be the oracle of the bet', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
-
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await time.increaseTo((await house.bets(betId)).noMoreBets);
 
@@ -1152,14 +1105,7 @@ contract('House', (accounts) => {
       );
     });
     it('Try set the win option in a bet in emergency', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
-
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await time.increaseTo((await house.bets(betId)).setWinTime);
 
@@ -1172,14 +1118,7 @@ contract('House', (accounts) => {
       );
     });
     it('Try set the win option in ongoing bet', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
-
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await time.increaseTo((await house.bets(betId)).noMoreBets.sub(bn(3)));
 
@@ -1192,14 +1131,7 @@ contract('House', (accounts) => {
       );
     });
     it('Try set the win option twice', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
-
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await time.increaseTo((await house.bets(betId)).noMoreBets);
 
@@ -1214,14 +1146,7 @@ contract('House', (accounts) => {
       );
     });
     it('Try set bytes32 0 as win option bet', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
-
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await time.increaseTo((await house.bets(betId)).noMoreBets);
 
@@ -1236,16 +1161,10 @@ contract('House', (accounts) => {
   });
   describe('Function collect', () => {
     it('Collect a win bet', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
 
       await setApproveBalance(player1, amount);
 
@@ -1283,18 +1202,12 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1);
     });
     it('Collect a win bet with equal minRate and maxRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
       const minRate = bn(10000);
       const maxRate = bn(10000);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner, minRate, maxRate });
 
       await setApproveBalance(player1, amount);
 
@@ -1334,18 +1247,10 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1.add(rewardAmount));
     });
     it('Collect a win bet with 0 minRate and 0 maxRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const minRate = bn(0);
-      const maxRate = bn(0);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner });
 
       await setApproveBalance(player1, amount);
 
@@ -1385,18 +1290,11 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1);
     });
     it('Collect a win bet with 0 minRate and maxRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const minRate = bn(0);
       const maxRate = bn(10000);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner, maxRate });
 
       await setApproveBalance(player1, amount);
 
@@ -1436,18 +1334,12 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1);
     });
     it('Collect a win bet with minRate and maxRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
       const minRate = bn(10000);
       const maxRate = bn(20000);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner, minRate, maxRate });
 
       await setApproveBalance(player1, amount);
 
@@ -1493,18 +1385,12 @@ contract('House', (accounts) => {
       const _PLAY = await PlayToken.at(await _house.PLAY());
       await _house.migrate(owner, { from: feeOwner });
 
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
       const minRate = bn(10000);
       const maxRate = bn(20000);
-      const salt = random32bn();
-      const betId = getId(feeOwner, _oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, _house.address);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await _house.create(_oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ house: _house, creator: feeOwner, oracle: _oracle, minRate, maxRate });
 
       await setApproveBalance(player1, amount, _house.address);
 
@@ -1549,17 +1435,12 @@ contract('House', (accounts) => {
       expect(await _PLAY.balanceOf(player1)).to.eq.BN(balancePLAYPlayer1);
     });
     it('Collect a draw bet', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
       const winOption = toOption('B');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet();
+
       await setApproveBalance(player1, amount);
       await house.play(betId, amount, option, RETURN_TRUE, { from: player1 });
       await time.increaseTo((await house.bets(betId)).noMoreBets);
@@ -1595,19 +1476,13 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1);
     });
     it('Collect a draw bet with equal minRate and maxRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
       const minRate = bn(10000);
       const maxRate = bn(10000);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
       const winOption = toOption('B');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner, minRate, maxRate });
 
       await setApproveBalance(player1, amount);
 
@@ -1647,19 +1522,11 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1.add(rewardAmount));
     });
     it('Collect a draw bet with 0 minRate and 0 maxRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const minRate = bn(0);
-      const maxRate = bn(0);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
       const winOption = toOption('B');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner });
 
       await setApproveBalance(player1, amount);
 
@@ -1699,19 +1566,12 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1);
     });
     it('Collect a draw bet with 0 minRate and maxRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const minRate = bn(0);
       const maxRate = bn(10000);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
       const winOption = toOption('B');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner, maxRate });
 
       await setApproveBalance(player1, amount);
 
@@ -1751,19 +1611,13 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1);
     });
     it('Collect a draw bet with minRate and maxRate', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
       const minRate = bn(10000);
       const maxRate = bn(20000);
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
       const winOption = toOption('B');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner, minRate, maxRate });
 
       await setApproveBalance(player1, amount);
 
@@ -1809,19 +1663,13 @@ contract('House', (accounts) => {
       const _PLAY = await PlayToken.at(await _house.PLAY());
       await _house.migrate(owner, { from: feeOwner });
 
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
       const minRate = bn(10000);
       const maxRate = bn(20000);
-      const salt = random32bn();
-      const betId = getId(feeOwner, _oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, _house.address);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
       const winOption = toOption('B');
 
-      await _house.create(_oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, minRate, maxRate, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ house: _house, creator: feeOwner, oracle: _oracle, minRate, maxRate });
 
       await setApproveBalance(player1, amount, _house.address);
 
@@ -1866,18 +1714,12 @@ contract('House', (accounts) => {
       expect(await _PLAY.balanceOf(player1)).to.eq.BN(balancePLAYPlayer1);
     });
     it('Collect a lose bet', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option1 = toOption('A');
       const option2 = toOption('B');
       const winOption = toOption('B');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner });
       await setApproveBalance(player1, amount);
       await house.play(betId, amount, option1, RETURN_TRUE, { from: player1 });
       await setApproveBalance(player2, amount);
@@ -1904,16 +1746,10 @@ contract('House', (accounts) => {
       );
     });
     it('Try collect twice and try collect without play', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
       const option = toOption('A');
       const amount = bn(web3.utils.randomHex(8));
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner });
       await setApproveBalance(player1, amount);
       await house.play(betId, amount, option, RETURN_TRUE, { from: player1 });
 
@@ -1981,16 +1817,10 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1);
     });
     it('Try collect a bet and oracle rejects the collect', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(feeOwner, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
       const option = toOption('A');
       const amount = bn(web3.utils.randomHex(8));
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: feeOwner });
+      const betId = await createBet({ creator: feeOwner });
       await setApproveBalance(player1, amount);
       await house.play(betId, amount, option, RETURN_TRUE, { from: player1 });
       await time.increaseTo((await house.bets(betId)).noMoreBets);
@@ -2007,16 +1837,12 @@ contract('House', (accounts) => {
     });
     // Emergency collect
     it('Collect a bet in emergency', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
+      const minRate = bn(10000);
+      const maxRate = bn(20000);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet({ creator: feeOwner, minRate, maxRate });
 
       await setApproveBalance(player1, amount);
 
@@ -2053,16 +1879,10 @@ contract('House', (accounts) => {
       expect(await PLAY.balanceOf(player1)).to.eq.BN(balances.PLAY.player1);
     });
     it('Try collect a bet in emergency without play on it', async () => {
-      const now = await time.latest();
-      const startDecreaseRate = now;
-      const noMoreBets = now.add(bn(30));
-      const maxSetWinTime = now.add(bn(60));
-      const salt = random32bn();
-      const betId = getId(creator, oracle, erc20, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE);
       const amount = bn(web3.utils.randomHex(8));
       const option = toOption('A');
 
-      await house.create(oracle.address, erc20.address, startDecreaseRate, noMoreBets, maxSetWinTime, 0, 0, salt, RETURN_TRUE, { from: creator });
+      const betId = await createBet({ creator: feeOwner });
 
       await setApproveBalance(player1, amount);
 

@@ -21,7 +21,7 @@ contract TestBetOracle is IBetOracle {
 
     // This methods should be sender by the House
 
-    function create(address, IERC20, uint256, uint256, bytes calldata _data) external pure override returns(bool) {
+    function create(address, IERC20, uint256, uint256, uint256, uint256, uint256, uint256, uint256, bytes calldata _data) external pure override returns(bool) {
         return _checkTrue(_data);
     }
 
