@@ -222,7 +222,7 @@ contract('House', (accounts) => {
           { from: creator },
         ),
         'Create',
-        { minRate: minRate, maxRate: maxRate},
+        { minRate: minRate, maxRate: maxRate },
       );
 
       const bet = await house.bets(web3.utils.soliditySha3(
